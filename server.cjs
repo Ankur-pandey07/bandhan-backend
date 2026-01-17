@@ -29,7 +29,7 @@ app.use("/api/swipe", swipeRoutes);
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/profile", require("./routes/profileRoutes"));
 app.use("/api/users", require("./routes/userRoutes"));
-app.use("/api/payment", require("./routes/paymentRoutes"));
+//app.use("/api/payment", require("./routes/paymentRoutes"));
 app.use("/api/newsletter", require("./routes/newsletterRoutes"));
 
 /* TEST */
