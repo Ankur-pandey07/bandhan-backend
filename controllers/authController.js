@@ -3,6 +3,31 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const sendEmail = require("../utils/sendEmail");
 
+/* 🔐 FIXED ADMIN CREDENTIALS (LOCKED) */
+const ADMIN_EMAIL = "bandhan123@gmail.com";
+const ADMIN_PASSWORD = "Bandhan2509";
+
+exports.verifyForgotPasswordOtp = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    const user = await User.findOne({ email });
+
+    if (
+      !user ||
+      user.forgotPasswordOtp !== otp ||
+      user.forgotPasswordOtpExpire < Date.now()
+    ) {
+      return res.status(400).json({ message: "Invalid or expired OTP" });
+    }
+
+    res.json({ success: true, message: "OTP verified" });
+  } catch (err) {
+    console.error("VERIFY FORGOT OTP ERROR:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 /* ================= REQUEST OTP ================= */
 exports.requestSignupOtp = async (req, res) => {
   try {
@@ -12,7 +37,6 @@ exports.requestSignupOtp = async (req, res) => {
       return res.status(400).json({ message: "All fields required" });
     }
 
-    // ❗ block only VERIFIED users
     const verifiedUser = await User.findOne({
       email,
       isEmailVerified: true,
@@ -25,8 +49,7 @@ exports.requestSignupOtp = async (req, res) => {
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // upsert temp user
-    const user = await User.findOneAndUpdate(
+    await User.findOneAndUpdate(
       { email },
       {
         name,
@@ -65,10 +88,7 @@ exports.verifySignupOtp = async (req, res) => {
       return res.status(400).json({ message: "OTP not found" });
     }
 
-    if (
-      user.resetOtp !== otp ||
-      user.resetOtpExpire < Date.now()
-    ) {
+    if (user.resetOtp !== otp || user.resetOtpExpire < Date.now()) {
       return res.status(400).json({ message: "Invalid or expired OTP" });
     }
 
@@ -115,13 +135,10 @@ exports.resendSignupOtp = async (req, res) => {
   }
 };
 
+/* ================= FORGOT PASSWORD ================= */
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
-
-    if (!email) {
-      return res.status(400).json({ message: "Email is required" });
-    }
 
     const user = await User.findOne({
       email,
@@ -138,8 +155,6 @@ exports.forgotPassword = async (req, res) => {
     user.forgotPasswordOtpExpire = Date.now() + 10 * 60 * 1000;
     await user.save();
 
-    console.log("🔐 FORGOT OTP:", email, otp);
-
     await sendEmail(
       email,
       "Bandhan Password Reset OTP",
@@ -152,32 +167,13 @@ exports.forgotPassword = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
-exports.verifyForgotPasswordOtp = async (req, res) => {
-  try {
-    const { email, otp } = req.body;
 
-    const user = await User.findOne({ email });
-
-    if (
-      !user ||
-      user.forgotPasswordOtp !== otp ||
-      user.forgotPasswordOtpExpire < Date.now()
-    ) {
-      return res.status(400).json({ message: "Invalid or expired OTP" });
-    }
-
-    res.json({ success: true, message: "OTP verified" });
-  } catch (err) {
-    console.error("VERIFY FORGOT OTP ERROR:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-};
+/* ================= RESET PASSWORD ================= */
 exports.resetPassword = async (req, res) => {
   try {
     const { email, newPassword } = req.body;
 
     const user = await User.findOne({ email });
-
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
@@ -185,7 +181,6 @@ exports.resetPassword = async (req, res) => {
     user.password = await bcrypt.hash(newPassword, 10);
     user.forgotPasswordOtp = null;
     user.forgotPasswordOtpExpire = null;
-
     await user.save();
 
     await sendEmail(
@@ -201,15 +196,42 @@ exports.resetPassword = async (req, res) => {
   }
 };
 
-/* ================= LOGIN ================= */
+/* ================= LOGIN (FINAL) ================= */
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({ message: "Email and password required" });
+      return res
+        .status(400)
+        .json({ message: "Email and password required" });
     }
 
+    /* 🔐 ADMIN LOGIN (FIXED CREDENTIALS) */
+    if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+      const token = jwt.sign(
+        { userId: "admin-fixed-001", role: "admin" },
+        process.env.JWT_SECRET,
+        { expiresIn: "7d" }
+      );
+
+      res.cookie("token", token, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: false,
+      });
+
+      return res.json({
+        success: true,
+        user: {
+          _id: "admin-fixed-001",
+          email: ADMIN_EMAIL,
+          role: "admin",
+        },
+      });
+    }
+
+    /* ================= NORMAL USER LOGIN ================= */
     const user = await User.findOne({
       email,
       isEmailVerified: true,
@@ -225,7 +247,7 @@ exports.login = async (req, res) => {
     }
 
     const token = jwt.sign(
-      { userId: user._id },
+      { userId: user._id, role: "user" },
       process.env.JWT_SECRET,
       { expiresIn: "7d" }
     );
@@ -242,6 +264,7 @@ exports.login = async (req, res) => {
         _id: user._id,
         name: user.name,
         email: user.email,
+        role: "user",
       },
     });
   } catch (err) {
@@ -253,16 +276,35 @@ exports.login = async (req, res) => {
 /* ================= ME ================= */
 exports.me = async (req, res) => {
   try {
+    // 🔐 ADMIN CASE (NO DB ENTRY)
+    if (req.userRole === "admin" || req.userId === "admin-fixed-001") {
+      return res.json({
+        success: true,
+        user: {
+          _id: "admin-fixed-001",
+          name: "Bandhan Admin",
+          email: "bandhan123@gmail.com",
+          role: "admin",
+          bio: "Platform administrator",
+          interests: ["Moderation", "User Support", "System Monitoring"],
+        },
+      });
+    }
+
+    // 👤 NORMAL USER
     const user = await User.findById(req.userId).select("-password");
+
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
+
     res.json({ success: true, user });
   } catch (err) {
     console.error("ME ERROR:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
+
 
 /* ================= LOGOUT ================= */
 exports.logout = async (req, res) => {

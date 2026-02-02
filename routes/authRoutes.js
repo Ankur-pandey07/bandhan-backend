@@ -8,20 +8,18 @@ const {
   login,
   me,
   logout,
-
   forgotPassword,
-  verifyForgotPasswordOtp,
   resetPassword,
 } = require("../controllers/authController");
 
-
 const authMiddleware = require("../middleware/authMiddleware");
 
+// 🔐 AUTH ROUTES ONLY
 router.post("/signup/request-otp", requestSignupOtp);
 router.post("/signup/verify-otp", verifySignupOtp);
 router.post("/signup/resend-otp", resendSignupOtp);
+
 router.post("/forgot-password", forgotPassword);
-router.post("/forgot-password/verify-otp", verifyForgotPasswordOtp);
 router.post("/forgot-password/reset", resetPassword);
 
 router.post("/login", login);

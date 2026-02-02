@@ -1,32 +1,103 @@
-const User = require("../models/User");
+const RelationshipChat = require("../models/RelationshipChat");
 
-// Simple admin login (static credentials)
-exports.adminLogin = (req, res) => {
-  const { email, password } = req.body;
-
-  if (email === "admin@bandhan.com" && password === "admin123") {
-    return res.json({ success: true, message: "Admin logged in" });
-  }
-
-  res.status(400).json({ success: false, message: "Invalid admin credentials" });
+/* ================= ADMIN NOTIFICATIONS ================= */
+exports.getAdminNotifications = (req, res) => {
+  res.json({
+    success: true,
+    notifications: global.pendingChatRequests || [],
+  });
 };
 
-// Get all users (admin only)
-exports.adminGetUsers = async (req, res) => {
+/* ================= USER NOTIFICATIONS ================= */
+exports.getUserNotifications = (req, res) => {
+  const userId = req.userId;
+
+  res.json({
+    success: true,
+    notifications: global.userNotifications[userId] || [],
+  });
+};
+
+/* ================= ACCEPT CHAT ================= */
+exports.acceptChat = (req, res) => {
+  const { id } = req.body;
+
+  const index = global.pendingChatRequests.findIndex(
+    (c) => c.id === id
+  );
+
+  if (index === -1) {
+    return res.status(404).json({ message: "Not found" });
+  }
+
+  const chat = global.pendingChatRequests.splice(index, 1)[0];
+
+  // ✅ ACTIVE CHAT
+  global.activeChats.push(chat);
+
+  // 🔔 USER NOTIFICATION
+  if (!global.userNotifications[chat.userId]) {
+    global.userNotifications[chat.userId] = [];
+  }
+
+  global.userNotifications[chat.userId].push({
+    text: "Your chat has been accepted by admin",
+    createdAt: new Date(),
+  });
+
+  res.json({ success: true });
+};
+
+/* ================= GET ACTIVE CHATS ================= */
+exports.getActiveChats = (req, res) => {
+  res.json({
+    success: true,
+    chats: global.activeChats || [],
+  });
+};
+
+/* ================= GET ALL CHATS ================= */
+exports.getAllChats = async (req, res) => {
   try {
-    const users = await User.find().select("-password");
-    res.json(users);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const chats = await RelationshipChat.find({})
+      .sort({ lastActiveAt: -1 })
+      .lean();
+
+    res.json({ success: true, chats });
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
   }
 };
 
-// Delete user
-exports.adminDeleteUser = async (req, res) => {
+/* ================= REPLY TO CHAT ================= */
+exports.replyToChat = async (req, res) => {
   try {
-    await User.findByIdAndDelete(req.params.id);
-    res.json({ message: "User deleted successfully" });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const { chatId, text } = req.body;
+
+    if (!chatId || !text) {
+      return res.status(400).json({
+        message: "chatId and text required",
+      });
+    }
+
+    const chat = await RelationshipChat.findById(chatId);
+    if (!chat) {
+      return res.status(404).json({
+        message: "Chat not found",
+      });
+    }
+
+    chat.messages.push({
+      role: "system",
+      text,
+      createdAt: new Date(),
+    });
+
+    chat.lastActiveAt = new Date();
+    await chat.save();
+
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ message: "Server error" });
   }
 };
